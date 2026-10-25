@@ -2,6 +2,7 @@
 
 #include "app/battle.h"
 #include "app/digimon_cfg.h"
+#include "audio.h"
 #include "board.h"
 #include "clock.h"
 #include "imu.h"
@@ -175,15 +176,6 @@ int moodFromHp() {
   return 0;
 }
 
-uint8_t avatarStage(uint8_t form) {
-  if (form == 0) return 0;         // egg
-  if (form <= 2) return 1;         // baby
-  if (form <= 10) return 2;        // rookie
-  if (form <= 19) return 3;        // champion
-  if (form <= 29) return 4;        // ultimate
-  return 5;                        // mega
-}
-
 void ageText(char *out, size_t n, uint32_t minutes) {
   if (minutes < 60) snprintf(out, n, "%u分钟", (unsigned)minutes);
   else if (minutes < 1440) snprintf(out, n, "%u小时%u分", (unsigned)(minutes / 60), (unsigned)(minutes % 60));
@@ -285,8 +277,7 @@ void refreshHome() {
   uint16_t w = g_pet->weight10();
   lv_label_set_text_fmt(statLbl[5], "体重 %u.%ukg", (unsigned)(w / 10), (unsigned)(w % 10));
 
-  petAvatarSetSpecies(g_avatar, typeColor(g_pet->type()),
-                      avatarStage(g_pet->form));
+  petAvatarSetSpecies(g_avatar, typeColor(g_pet->type()), g_pet->form);
   uint8_t act = g_pet->act(millis());
   bool excited = (act == DG_ACT_HAPPY || act == DG_ACT_TRAIN || act == DG_ACT_ATTACK);
   petAvatarSetMood(g_avatar, moodFromHp(), excited, g_petSleeping);
@@ -1077,6 +1068,7 @@ void wakePet() {
   setPetSleeping(false);
   toast("醒来了");
   showHeart();
+  audioChirp();
 }
 
 void onPetTouch(lv_event_t *) {
@@ -1089,6 +1081,7 @@ void onPetTouch(lv_event_t *) {
     g_pet->oneShotUntil = millis() + 1500;
   }
   showHeart();
+  audioChirp();
   refreshHome();
 }
 
@@ -1206,6 +1199,7 @@ void statusTick(lv_timer_t *) {
 void buttonTick(lv_timer_t *) {
   uint32_t now = millis();
   uint8_t ev = powerPoll();
+  if (ev) audioClick();
 
   if (ev & PEV_SCREEN) { powerOff(); return; }
   if (g_locked) {
@@ -1261,6 +1255,7 @@ void ui_init(Digimon &pet) {
 
   powerInit();
   imuInit();
+  audioInit();
   clockInit();
 
   g_disp = lv_display_get_default();

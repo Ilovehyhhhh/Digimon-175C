@@ -86,6 +86,8 @@ AXP2101 的 IRQ 没有引到 ESP32 GPIO，因此 PEK 事件通过 I2C 轮询
 - `main/ui/power.c`：通过 BSP I2C 句柄访问 AXP2101，读取电池电压/电量，
   轮询 PWR 键事件，并调用软关机。
 - `main/ui/imu.c`：通过 BSP I2C 句柄配置 QMI8658，读取加速度并做摇一摇检测。
+- `main/ui/audio.c`：用 `bsp_audio_codec_speaker_init()` 打开 ES8311，在独立
+  FreeRTOS 任务里播放合成按键音 / 宠物叫声，不阻塞 LVGL。
 - `main/ui/ui.cpp`：LVGL 全屏 UI；`pet-ui: display 466x466` 可在串口日志确认。
 - `main/board.h`：本文件的引脚/能力常量，来源于参考工程
   [`claude-desktop-buddy-esp32`](https://github.com/vthinkxie/claude-desktop-buddy-esp32)

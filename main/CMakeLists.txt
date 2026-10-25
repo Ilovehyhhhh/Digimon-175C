@@ -12,6 +12,7 @@ idf_component_register(
         "ui/ui.cpp"
         "ui/pet_avatar.cpp"
         "ui/clock.c"
+        "ui/audio.c"
         "ui/power.c"
         "ui/imu.c"
         "ui/digifont.c"
