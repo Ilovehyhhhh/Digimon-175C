@@ -9,7 +9,7 @@
 
 static const uint32_t DG_TICK_MS = 60000UL;
 static const uint32_t EXP_PER_TICK = 2;
-static const uint8_t DG_SAVE_VER = 5;
+static const uint8_t DG_SAVE_VER = 6;
 static const uint8_t GROWTH[DG_STAT_N] = { 8, 3, 2, 2, 2, 2, 2 };
 
 static Preferences s_prefs;
