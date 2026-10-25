@@ -76,9 +76,7 @@ static const char CFG_JSON[] = R"JSON(
     { "from": 2,  "to": 10, "age": 20, "lvl": 2, "spi": 14, "wmax": 10 },
 
     { "from": 3,  "to": 11, "age": 45, "lvl": 2, "atk": 45, "wmin": 15 },
-    { "from": 3,  "to": 12, "age": 50, "lvl": 2, "spd": 40, "wmin": 15 },
     { "from": 4,  "to": 12, "age": 45, "lvl": 2, "spd": 40, "wmin": 20 },
-    { "from": 4,  "to": 11, "age": 50, "lvl": 2, "atk": 45, "wmin": 20 },
     { "from": 5,  "to": 13, "age": 45, "lvl": 2, "spi": 35, "wmax": 25 },
     { "from": 5,  "to": 19, "age": 45, "lvl": 2, "atk": 35 },
     { "from": 6,  "to": 14, "age": 45, "lvl": 2, "spi": 30, "wmax": 25 },
@@ -91,9 +89,7 @@ static const char CFG_JSON[] = R"JSON(
 
     { "from": 11, "to": 20, "age": 100, "lvl": 4, "atk": 80, "wmin": 60 },
     { "from": 11, "to": 28, "age": 90,  "lvl": 3, "atk": 100, "wmin": 50 },
-    { "from": 11, "to": 21, "age": 110, "lvl": 4, "spd": 70 },
     { "from": 12, "to": 21, "age": 100, "lvl": 4, "spd": 80, "wmin": 50 },
-    { "from": 12, "to": 20, "age": 110, "lvl": 4, "atk": 80 },
     { "from": 13, "to": 22, "age": 100, "lvl": 4, "spi": 70, "wmax": 40 },
     { "from": 13, "to": 27, "age": 110, "lvl": 4, "spi": 80, "wmax": 40 },
     { "from": 14, "to": 23, "age": 100, "lvl": 4, "spi": 70, "wmax": 60 },
@@ -201,3 +197,4 @@ void cfgLoad(void) {
 
   ESP_LOGI(TAG, "config: %d especies, %d ramas", g_spN, g_evoN);
 }
+

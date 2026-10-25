@@ -16,6 +16,7 @@
 #include <Arduino.h>
 #include <Preferences.h>
 
+#include <math.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -33,6 +34,7 @@ constexpr uint32_t C_ACCENT = 0x4FC3F7;
 constexpr uint32_t C_GOOD   = 0x66BB6A;
 constexpr uint32_t C_WARN   = 0xFFA726;
 constexpr uint32_t C_BAD    = 0xEF5350;
+constexpr uint32_t C_PINK   = 0xF06292;
 constexpr uint32_t TRAIN_MS = 10000;
 constexpr uint32_t UI_REFR_PERIOD_MS = 15;
 constexpr uint32_t LOCK_REFR_PERIOD_MS = 500;
@@ -50,6 +52,7 @@ Preferences s_ui;
 bool g_locked = false;
 bool g_training = false;
 bool g_resetConfirm = false;
+bool g_petSleeping = false;
 uint8_t g_bright = 100;
 
 uint32_t g_toastUntil = 0;
@@ -80,6 +83,8 @@ lv_obj_t *lblName = nullptr;
 lv_obj_t *lblSub = nullptr;
 lv_obj_t *lblType = nullptr;
 lv_obj_t *lblToast = nullptr;
+lv_obj_t *lblHeart = nullptr;
+lv_obj_t *lblZzz = nullptr;
 lv_obj_t *lblHp = nullptr;
 lv_obj_t *lblSp = nullptr;
 lv_obj_t *lblHpVal = nullptr;
@@ -129,8 +134,12 @@ void onBattleAction(lv_event_t *e);
 void onEvolveTarget(lv_event_t *e);
 void onDevolveTarget(lv_event_t *e);
 void onBright(lv_event_t *e);
+void onPetTouch(lv_event_t *e);
 void refreshHome();
 void goHome();
+void showHeart();
+void setPetSleeping(bool on);
+void wakePet();
 void openTimeSet();
 void refreshTimeSet();
 void updateLockTime();
@@ -164,6 +173,15 @@ int moodFromHp() {
   if (pct >= 40) return 3;
   if (pct >= 15) return 1;
   return 0;
+}
+
+uint8_t avatarStage(uint8_t form) {
+  if (form == 0) return 0;         // egg
+  if (form <= 2) return 1;         // baby
+  if (form <= 10) return 2;        // rookie
+  if (form <= 19) return 3;        // champion
+  if (form <= 29) return 4;        // ultimate
+  return 5;                        // mega
 }
 
 void ageText(char *out, size_t n, uint32_t minutes) {
@@ -267,11 +285,11 @@ void refreshHome() {
   uint16_t w = g_pet->weight10();
   lv_label_set_text_fmt(statLbl[5], "体重 %u.%ukg", (unsigned)(w / 10), (unsigned)(w % 10));
 
-  petAvatarSetSpecies(g_avatar, g_pet->isEgg() ? "蛋" : g_pet->name(),
-                      typeColor(g_pet->type()));
+  petAvatarSetSpecies(g_avatar, typeColor(g_pet->type()),
+                      avatarStage(g_pet->form));
   uint8_t act = g_pet->act(millis());
   bool excited = (act == DG_ACT_HAPPY || act == DG_ACT_TRAIN || act == DG_ACT_ATTACK);
-  petAvatarSetMood(g_avatar, moodFromHp(), excited);
+  petAvatarSetMood(g_avatar, moodFromHp(), excited, g_petSleeping);
   petAvatarSetImage(g_avatar, g_petImage);
 
   if ((int32_t)(millis() - g_toastUntil) < 0 && g_toast[0]) {
@@ -296,6 +314,16 @@ void buildHome() {
   lv_obj_align(lblType, LV_ALIGN_TOP_MID, 0, 70);
 
   petAvatarCreate(g_avatar, scr_home, 156, -56);
+  lv_obj_add_event_cb(g_avatar.root, onPetTouch, LV_EVENT_CLICKED, nullptr);
+
+  lblHeart = mkLabel(scr_home, "爱心", &digifont_small, C_PINK);
+  lv_obj_set_width(lblHeart, 120);
+  lv_obj_align(lblHeart, LV_ALIGN_CENTER, 0, -60);
+  lv_obj_add_flag(lblHeart, LV_OBJ_FLAG_HIDDEN);
+
+  lblZzz = mkLabel(scr_home, "Zzz", &digifont, C_ACCENT);
+  lv_obj_set_pos(lblZzz, 310, 122);
+  lv_obj_add_flag(lblZzz, LV_OBJ_FLAG_HIDDEN);
 
   lblHp = mkLabel(scr_home, "HP", &digifont_small, C_TEXT);
   lv_obj_set_pos(lblHp, 56, 254);
@@ -365,13 +393,16 @@ void buildMenu() {
   lv_obj_t *t = mkLabel(scr_menu, "菜单", &digifont, C_TEXT);
   lv_obj_align(t, LV_ALIGN_TOP_MID, 0, 24);
 
-  const char *names[7] = { "进化", "训练", "对战", "状态", "属性", "系统", "返回" };
-  const UiAct acts[7] = { ACT_EVOLVE, ACT_TRAIN, ACT_BATTLE, ACT_STATUS,
-                          ACT_TYPES, ACT_SYSTEM, ACT_HOME };
-  for (int i = 0; i < 7; i++) {
-    lv_obj_t *b = mkButton(scr_menu, names[i], 220, 42, &digifont, acts[i]);
-    lv_obj_set_pos(b, 123, 78 + i * 46);
+  const char *names[6] = { "进化", "训练", "对战", "状态", "属性", "系统" };
+  const UiAct acts[6] = { ACT_EVOLVE, ACT_TRAIN, ACT_BATTLE,
+                          ACT_STATUS, ACT_TYPES, ACT_SYSTEM };
+  for (int i = 0; i < 6; i++) {
+    int row = i / 2, col = i % 2;
+    lv_obj_t *b = mkButton(scr_menu, names[i], 150, 50, &digifont, acts[i]);
+    lv_obj_set_pos(b, 77 + col * 162, 85 + row * 62);
   }
+  lv_obj_t *back = mkButton(scr_menu, "返回", 312, 50, &digifont, ACT_HOME);
+  lv_obj_set_pos(back, 77, 271);
 }
 
 // ---------------------------------------------------------------- status
@@ -552,7 +583,7 @@ void buildSystem() {
   lv_obj_set_style_text_align(lblSysInfo, LV_TEXT_ALIGN_LEFT, 0);
   lv_obj_set_style_text_line_space(lblSysInfo, 6, 0);
 
-  lblKeys = mkLabel(scr_system, "BOOT 短按  菜单\nPWR 短按   锁屏\nPWR 长按   关机",
+  lblKeys = mkLabel(scr_system, "BOOT 短按  菜单\nPWR 短按   锁屏/唤醒\nPWR 长按   关机\n锁定后 BOOT 无效",
                     &digifont_small, C_DIM);
   lv_obj_set_pos(lblKeys, 70, 230);
   lv_obj_set_width(lblKeys, 326);
@@ -575,6 +606,7 @@ void buildSystem() {
 
 void openEvolve() {
   if (g_pet && g_pet->isEgg()) { toast("还没孵化"); goHome(); return; }
+  if (g_petSleeping) { toast("先摇一摇叫醒它"); goHome(); return; }
   lv_obj_clean(evolveList);
 
   lv_obj_t *cur = mkLabel(evolveList, "", &digifont_small, C_DIM);
@@ -662,6 +694,7 @@ void finishTraining() {
 
 void openTraining() {
   if (g_pet && g_pet->isEgg()) { toast("还没孵化"); goHome(); return; }
+  if (g_petSleeping) { toast("先摇一摇叫醒它"); goHome(); return; }
   g_training = true;
   g_trainHits = 0;
   g_trainEnd = millis() + TRAIN_MS;
@@ -752,6 +785,7 @@ void refreshBattle() {
 void openBattle() {
   if (!g_pet) return;
   if (g_pet->isEgg()) { toast("还没孵化"); goHome(); return; }
+  if (g_petSleeping) { toast("先摇一摇叫醒它"); goHome(); return; }
   battleBegin(g_battle, *g_pet);
   refreshBattle();
   lv_screen_load(scr_battle);
@@ -994,6 +1028,70 @@ void buildLock() {
   lv_obj_align(hint, LV_ALIGN_CENTER, 0, 110);
 }
 
+// ---------------------------------------------------------------- touch / sleep
+
+void animHeartY(void *var, int32_t v) {
+  lv_obj_set_y((lv_obj_t *)var, v);
+}
+
+void animHeartOpa(void *var, int32_t v) {
+  lv_obj_set_style_opa((lv_obj_t *)var, (lv_opa_t)v, 0);
+}
+
+void showHeart() {
+  if (!lblHeart) return;
+  lv_anim_del(lblHeart, nullptr);
+  lv_obj_remove_flag(lblHeart, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_align(lblHeart, LV_ALIGN_CENTER, 0, -60);
+  lv_obj_set_style_opa(lblHeart, LV_OPA_COVER, 0);
+  int y0 = lv_obj_get_y(lblHeart);
+
+  lv_anim_t ay;
+  lv_anim_init(&ay);
+  lv_anim_set_var(&ay, lblHeart);
+  lv_anim_set_values(&ay, y0, y0 - 55);
+  lv_anim_set_duration(&ay, 1200);
+  lv_anim_set_exec_cb(&ay, animHeartY);
+  lv_anim_start(&ay);
+
+  lv_anim_t ao;
+  lv_anim_init(&ao);
+  lv_anim_set_var(&ao, lblHeart);
+  lv_anim_set_values(&ao, 255, 0);
+  lv_anim_set_duration(&ao, 1200);
+  lv_anim_set_exec_cb(&ao, animHeartOpa);
+  lv_anim_start(&ao);
+}
+
+void setPetSleeping(bool on) {
+  g_petSleeping = on;
+  if (lblZzz) {
+    if (on) lv_obj_remove_flag(lblZzz, LV_OBJ_FLAG_HIDDEN);
+    else lv_obj_add_flag(lblZzz, LV_OBJ_FLAG_HIDDEN);
+  }
+  refreshHome();
+}
+
+void wakePet() {
+  if (!g_petSleeping) return;
+  setPetSleeping(false);
+  toast("醒来了");
+  showHeart();
+}
+
+void onPetTouch(lv_event_t *) {
+  if (g_petSleeping) {
+    wakePet();
+    return;
+  }
+  if (g_pet) {
+    g_pet->oneShot = DG_ACT_HAPPY;
+    g_pet->oneShotUntil = millis() + 1500;
+  }
+  showHeart();
+  refreshHome();
+}
+
 // ---------------------------------------------------------------- events
 
 void onAction(lv_event_t *e) {
@@ -1054,10 +1152,9 @@ void animTick(lv_timer_t *) {
   static const int8_t bob[8] = { 0, -1, -3, -4, -3, -1, 1, 0 };
   uint8_t act = g_pet->act(millis());
   bool excited = (act == DG_ACT_HAPPY || act == DG_ACT_TRAIN || act == DG_ACT_ATTACK);
-  int dy = bob[g_animCount % 8];
-  if (excited) dy -= (g_animCount % 2) ? 6 : 2;
+  int dy = g_petSleeping ? 0 : bob[g_animCount % 8];
+  if (excited && !g_petSleeping) dy -= (g_animCount % 2) ? 6 : 2;
   petAvatarBob(g_avatar, dy);
-  petAvatarSetBlink(g_avatar, (g_animCount % 11) == 0);
 }
 
 void statusTick(lv_timer_t *) {
@@ -1112,10 +1209,7 @@ void buttonTick(lv_timer_t *) {
 
   if (ev & PEV_SCREEN) { powerOff(); return; }
   if (g_locked) {
-    if (ev & (PEV_A | PEV_B)) {
-      unlock();
-      if (ev & PEV_A) openMenu();
-    }
+    if (ev & PEV_B) unlock();
     return;
   }
   if (ev & PEV_B) { lockNow(); return; }
@@ -1130,10 +1224,29 @@ void buttonTick(lv_timer_t *) {
     if (shook) addTrainHit();
     return;
   }
-  if (shook && lv_screen_active() == scr_home && g_pet) {
-    g_pet->oneShot = DG_ACT_HAPPY;
-    g_pet->oneShotUntil = now + 1500;
-    refreshHome();
+  if (shook && g_petSleeping) {
+    wakePet();
+    return;
+  }
+  if (lv_screen_active() == scr_home && g_pet) {
+    float ax, ay, az;
+    static bool faceDown = false;
+    static uint32_t faceDownAt = 0;
+    if (imuRead(&ax, &ay, &az)) {
+      bool down = az < -0.7f && fabsf(ax) < 0.4f && fabsf(ay) < 0.4f;
+      if (down && !faceDown) { faceDown = true; faceDownAt = now; }
+      if (!down) faceDown = false;
+      if (faceDown && now - faceDownAt > 1500 && !g_petSleeping) {
+        setPetSleeping(true);
+        return;
+      }
+    }
+    if (shook) {
+      g_pet->oneShot = DG_ACT_HAPPY;
+      g_pet->oneShotUntil = now + 1500;
+      showHeart();
+      refreshHome();
+    }
   }
 }
 

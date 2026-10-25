@@ -17,7 +17,6 @@ idf_component_register(
         "ui/digifont.c"
         "ui/digifont_small.c"
         "ui/digifont_big.c"
-        "ui/digifont_pet.c"
     INCLUDE_DIRS
         "."
         "ui"

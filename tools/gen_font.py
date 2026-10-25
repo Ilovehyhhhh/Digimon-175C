@@ -5,10 +5,9 @@
 Recorre main/**/*.{c,cpp,h}, recoge todos los caracteres CJK (y puntuacion CJK)
 que aparecen como literales y llama a lv_font_conv (via npx) para emitir:
 
-  main/ui/digifont.c       24 px  -> interfaz principal
-  main/ui/digifont_small.c 16 px  -> textos secundarios
-  main/ui/digifont_big.c   64 px  -> digitos grandes (bateria / contador)
-  main/ui/digifont_pet.c   96 px  -> caracter grande que hace de mascota
+  main/ui/digifont.c       30 px -> interfaz principal
+  main/ui/digifont_small.c 20 px -> textos secundarios
+  main/ui/digifont_big.c   64 px -> digitos grandes (hora / bateria / contador)
 
 Re-ejecutar cuando se anadan textos nuevos:
   python tools/gen_font.py
@@ -24,16 +23,13 @@ SRC = os.path.join(ROOT, 'main')
 OUTDIR = os.path.join(SRC, 'ui')
 FONT = os.environ.get('PET_FONT', r'C:\Windows\Fonts\simhei.ttf')
 
-# Respaldo si no se puede leer la config: primeros caracteres de las especies.
-PET_SYMBOLS = '黑球兽滚亚古暴龙机械战斗丧尸'
 DIGITS = '0123456789:% '
-
 CJK_SET = 'cjk'
+
 JOBS = [
     (30, 1, 'digifont.c',       CJK_SET),
     (20, 1, 'digifont_small.c', CJK_SET),
     (64, 1, 'digifont_big.c',   DIGITS),
-    (96, 1, 'digifont_pet.c',   'pet'),
 ]
 
 
@@ -53,20 +49,6 @@ def collect():
                 if '\u4e00' <= ch <= '\u9fff' or '\u3000' <= ch <= '\u303f' or '\uff00' <= ch <= '\uffef':
                     chars.add(ch)
     return chars
-
-
-def pet_symbols():
-    """Primer caracter de cada especie de digimon_cfg.cpp (avatar de la mascota)."""
-    path = os.path.join(SRC, 'app', 'digimon_cfg.cpp')
-    try:
-        txt = open(path, encoding='utf-8-sig').read()
-    except OSError:
-        return PET_SYMBOLS
-    chars = {'数', '蛋'}   # respaldo "数码蛋" y avatar de huevo
-    for m in re.finditer(r'"name"\s*:\s*"([^"]+)"', txt):
-        if m.group(1):
-            chars.add(m.group(1)[0])
-    return ''.join(sorted(chars)) if chars else PET_SYMBOLS
 
 
 def build(size, bpp, outfile, symbols):
@@ -104,16 +86,9 @@ def main():
         print('sin caracteres CJK; nada que hacer')
         return
     symbols = ''.join(sorted(chars))
-    pet = pet_symbols()
     print('CJK unicos: %d -> %s' % (len(chars), symbols[:60] + ('...' if len(symbols) > 60 else '')))
-    print('avatar de mascota: %s' % pet)
     for size, bpp, fn, symset in JOBS:
-        if symset == CJK_SET:
-            sym = symbols
-        elif symset == 'pet':
-            sym = pet
-        else:
-            sym = symset
+        sym = symbols if symset == CJK_SET else symset
         build(size, bpp, fn, sym)
 
 

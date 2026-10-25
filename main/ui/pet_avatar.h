@@ -4,30 +4,27 @@
 
 #include <stdint.h>
 
-// Avatar de la mascota aislado de la logica de juego.
+// Avatar de la mascota: dibujo procedural de lineas/pixeles, sin texto ni cara.
+// Etapas: 0 huevo, 1 baby, 2 rookie, 3 champion, 4 ultimate, 5 mega.
 //
-// Ahora mismo se dibuja con un caracter chino grande. Cuando haya sprites,
-// basta con llamar a petAvatarSetImage() con un lv_image_dsc_t: la imagen
-// sustituye al texto y a la cara sin tocar el resto de la UI.
-// Poner aqui una imagen (lv_image_dsc_t) para sustituir el avatar de texto.
-// Dejarlo a nullptr para usar el caracter chino.
+// Si hay sprites, basta con apuntar g_petImage a un lv_image_dsc_t: sustituye
+// el dibujo procedural sin tocar la logica del juego.
 extern const lv_image_dsc_t *g_petImage;
 
 struct PetAvatar {
   lv_obj_t *root = nullptr;
   lv_obj_t *image = nullptr;
-  lv_obj_t *glyph = nullptr;
-  lv_obj_t *eyeL = nullptr;
-  lv_obj_t *eyeR = nullptr;
-  lv_obj_t *mouth = nullptr;
+  lv_image_dsc_t dsc = {};
+  uint32_t *buf = nullptr;
   int size = 0;
   int baseY = 0;
-  int eyeH = 0;
+  uint8_t stage = 0xFF;
+  uint32_t accent = 0;
+  bool realImage = false;
 };
 
 void petAvatarCreate(PetAvatar &a, lv_obj_t *parent, int size, int yOffset);
-void petAvatarSetSpecies(PetAvatar &a, const char *name, uint32_t accent);
-void petAvatarSetMood(PetAvatar &a, int mood, bool excited);
-void petAvatarSetBlink(PetAvatar &a, bool blink);
+void petAvatarSetSpecies(PetAvatar &a, uint32_t accent, uint8_t stage);
+void petAvatarSetMood(PetAvatar &a, int mood, bool excited, bool sleeping);
 void petAvatarBob(PetAvatar &a, int dy);
 void petAvatarSetImage(PetAvatar &a, const lv_image_dsc_t *dsc);
