@@ -9,7 +9,7 @@
 
 static const uint32_t DG_TICK_MS = 60000UL;
 static const uint32_t EXP_PER_TICK = 2;
-static const uint8_t DG_SAVE_VER = 3;
+static const uint8_t DG_SAVE_VER = 5;
 static const uint8_t GROWTH[DG_STAT_N] = { 8, 3, 2, 2, 2, 2, 2 };
 
 static Preferences s_prefs;
@@ -20,10 +20,12 @@ void Digimon::defaults() {
   exp = 0;
   weightBonus10 = 0;
   memset(train, 0, sizeof(train));
+  wins = 0;
   hp = maxHp();
   sp = maxSp();
   oneShot = 255;
   oneShotUntil = 0;
+  justHatched = false;
   dirty = true;
 }
 
@@ -72,6 +74,7 @@ int Digimon::evoList(uint8_t *out, int max) const {
     if (e.spd   && (int32_t)spd()   < e.spd)   continue;
     if (e.wmin  && (int32_t)weight10() < e.wmin * 10) continue;
     if (e.wmax  && (int32_t)weight10() > e.wmax * 10) continue;
+    if (e.wins  && (int32_t)wins < e.wins) continue;
     if (e.to >= (uint8_t)g_spN) continue;
     bool dup = false;
     for (int k = 0; k < n; k++) if (out[k] == e.to) dup = true;
@@ -169,6 +172,19 @@ void Digimon::clampVitals() {
 
 void Digimon::tick() {
   ageMin++;
+
+  if (isEgg()) {
+    if (g_spN > 1 && ageMin >= EGG_HATCH_MIN) {
+      form = 1;  // 黑球兽
+      heal(maxHp(), maxSp());
+      oneShot = DG_ACT_HAPPY;
+      oneShotUntil = millis() + 2500;
+      justHatched = true;
+      dirty = true;
+    }
+    return;
+  }
+
   exp += EXP_PER_TICK;
 
   uint16_t hpmax = maxHp(), spmax = maxSp();
@@ -202,11 +218,18 @@ uint8_t Digimon::act(uint32_t nowMs) const {
   return DG_ACT_IDLE;
 }
 
+uint8_t Digimon::hatchLeft() const {
+  if (!isEgg()) return 0;
+  int left = (int)EGG_HATCH_MIN - (int)ageMin;
+  return left > 0 ? (uint8_t)left : 0;
+}
+
 void Digimon::save() {
   s_prefs.putUChar("ver", DG_SAVE_VER);
   s_prefs.putUChar("form", form);
   s_prefs.putUInt("age", ageMin);
   s_prefs.putUInt("exp", exp);
+  s_prefs.putUShort("wins", wins);
   s_prefs.putUShort("hp", hp);
   s_prefs.putUShort("sp", sp);
   s_prefs.putUShort("wb", weightBonus10);
@@ -226,6 +249,7 @@ void Digimon::load() {
   if (g_spN <= 0 || form >= (uint8_t)g_spN) form = 0;
   ageMin = s_prefs.getUInt("age", 0);
   exp = s_prefs.getUInt("exp", 0);
+  wins = s_prefs.getUShort("wins", 0);
   weightBonus10 = s_prefs.getUShort("wb", 0);
 
   size_t got = s_prefs.getBytes("trn", train, sizeof(train));

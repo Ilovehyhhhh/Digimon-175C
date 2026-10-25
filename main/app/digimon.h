@@ -17,6 +17,10 @@ enum DgAct : uint8_t {
   DG_ACT_HURT,
 };
 
+// La forma 0 del config es el huevo; a los 3 minutos eclosiona a 黑球兽.
+static constexpr uint8_t EGG_FORM = 0;
+static constexpr uint8_t EGG_HATCH_MIN = 3;
+
 class Digimon {
  public:
   uint8_t form = 0;             // especie actual (indice en g_sp[])
@@ -26,9 +30,11 @@ class Digimon {
   uint16_t sp = 0;              // SP actual
   uint16_t weightBonus10 = 0;   // peso extra por entrenamiento (0.1 kg)
   uint16_t train[DG_STAT_N] = {};
+  uint16_t wins = 0;            // victorias RPS
   uint8_t oneShot = 255;        // DgAct mostrada de golpe (255 = ninguna)
   uint32_t oneShotUntil = 0;
   bool dirty = false;
+  bool justHatched = false;     // evento para la UI
 
   void begin();
   bool update(uint32_t nowMs);   // regeneracion + exp por tiempo
@@ -51,6 +57,8 @@ class Digimon {
   uint16_t weight10() const;
   const char *name() const;
   uint8_t type() const;
+  bool isEgg() const { return form == EGG_FORM; }
+  uint8_t hatchLeft() const;
 
   // Evolucion / degradacion seleccionables ahora mismo.
   int evoList(uint8_t *out, int max) const;

@@ -62,7 +62,7 @@ def pet_symbols():
         txt = open(path, encoding='utf-8-sig').read()
     except OSError:
         return PET_SYMBOLS
-    chars = {'数'}   # respaldo "数码蛋"
+    chars = {'数', '蛋'}   # respaldo "数码蛋" y avatar de huevo
     for m in re.finditer(r'"name"\s*:\s*"([^"]+)"', txt):
         if m.group(1):
             chars.add(m.group(1)[0])

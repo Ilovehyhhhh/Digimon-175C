@@ -238,9 +238,13 @@ void refreshHome() {
 
   char age[32];
   ageText(age, sizeof(age), g_pet->ageMin);
-  PowerBatt b = powerBattery();
-  if (b.pct >= 0) lv_label_set_text_fmt(lblSub, "Lv.%u  %s  %d%%", (unsigned)g_pet->level(), age, b.pct);
-  else lv_label_set_text_fmt(lblSub, "Lv.%u  %s", (unsigned)g_pet->level(), age);
+  if (g_pet->isEgg()) {
+    lv_label_set_text_fmt(lblSub, "孵化中  约%u分钟", (unsigned)g_pet->hatchLeft());
+  } else {
+    PowerBatt b = powerBattery();
+    if (b.pct >= 0) lv_label_set_text_fmt(lblSub, "Lv.%u  %s  %d%%", (unsigned)g_pet->level(), age, b.pct);
+    else lv_label_set_text_fmt(lblSub, "Lv.%u  %s", (unsigned)g_pet->level(), age);
+  }
 
   lv_label_set_text_fmt(lblType, "属性 %s", dgTypeName(g_pet->type()));
   lv_obj_set_style_text_color(lblType, lv_color_hex(typeColor(g_pet->type())), 0);
@@ -263,7 +267,8 @@ void refreshHome() {
   uint16_t w = g_pet->weight10();
   lv_label_set_text_fmt(statLbl[5], "体重 %u.%ukg", (unsigned)(w / 10), (unsigned)(w % 10));
 
-  petAvatarSetSpecies(g_avatar, g_pet->name(), typeColor(g_pet->type()));
+  petAvatarSetSpecies(g_avatar, g_pet->isEgg() ? "蛋" : g_pet->name(),
+                      typeColor(g_pet->type()));
   uint8_t act = g_pet->act(millis());
   bool excited = (act == DG_ACT_HAPPY || act == DG_ACT_TRAIN || act == DG_ACT_ATTACK);
   petAvatarSetMood(g_avatar, moodFromHp(), excited);
@@ -383,7 +388,7 @@ void refreshStatus() {
            "名字  %s  属性 %s\n"
            "等级  Lv.%u  年龄 %s\n"
            "体重  %u.%ukg  经验 %u\n"
-           "战力  %u\n"
+           "战力  %u  胜场 %u\n"
            "HP    %u/%u\n"
            "SP    %u/%u\n"
            "攻击  %u  +%u\n"
@@ -395,7 +400,7 @@ void refreshStatus() {
            g_pet->name(), dgTypeName(g_pet->type()),
            (unsigned)g_pet->level(), age,
            (unsigned)(w / 10), (unsigned)(w % 10), (unsigned)g_pet->exp,
-           (unsigned)g_pet->power(),
+           (unsigned)g_pet->power(), (unsigned)g_pet->wins,
            (unsigned)g_pet->hp, (unsigned)g_pet->maxHp(),
            (unsigned)g_pet->sp, (unsigned)g_pet->maxSp(),
            (unsigned)g_pet->atk(), (unsigned)g_pet->train[DG_STAT_ATK],
@@ -569,6 +574,7 @@ void buildSystem() {
 // ---------------------------------------------------------------- evolve
 
 void openEvolve() {
+  if (g_pet && g_pet->isEgg()) { toast("还没孵化"); goHome(); return; }
   lv_obj_clean(evolveList);
 
   lv_obj_t *cur = mkLabel(evolveList, "", &digifont_small, C_DIM);
@@ -655,6 +661,7 @@ void finishTraining() {
 }
 
 void openTraining() {
+  if (g_pet && g_pet->isEgg()) { toast("还没孵化"); goHome(); return; }
   g_training = true;
   g_trainHits = 0;
   g_trainEnd = millis() + TRAIN_MS;
@@ -744,6 +751,7 @@ void refreshBattle() {
 
 void openBattle() {
   if (!g_pet) return;
+  if (g_pet->isEgg()) { toast("还没孵化"); goHome(); return; }
   battleBegin(g_battle, *g_pet);
   refreshBattle();
   lv_screen_load(scr_battle);
@@ -1057,6 +1065,12 @@ void statusTick(lv_timer_t *) {
   uint32_t now = millis();
 
   bool changed = g_pet->update(now);
+  if (g_pet->justHatched) {
+    g_pet->justHatched = false;
+    g_pet->save();
+    if (!g_locked) toast("孵化成功!");
+    changed = true;
+  }
   if (changed && !g_locked) {
     refreshHome();
     if (lv_screen_active() == scr_status) refreshStatus();

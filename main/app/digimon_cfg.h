@@ -21,10 +21,11 @@ struct CfgEvo {
   int32_t lvl;
   int32_t hp, atk, def, intel, spi, spd;
   int32_t wmin, wmax;         // kg
+  int32_t wins;               // victorias minimas
 };
 
-#define CFG_MAX_SPECIES 32
-#define CFG_MAX_EVOS    64
+#define CFG_MAX_SPECIES 64
+#define CFG_MAX_EVOS    128
 
 extern CfgSpecies g_sp[CFG_MAX_SPECIES];  extern int g_spN;
 extern CfgEvo     g_evo[CFG_MAX_EVOS];    extern int g_evoN;

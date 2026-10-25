@@ -61,6 +61,7 @@ void battleBegin(Battle &b, Digimon &pet) {
 
 static void winRound(Battle &b, Digimon &pet) {
   b.state = BS_WIN;
+  pet.wins++;
   uint32_t gain = 20 + (uint32_t)b.foe.level * 5;
   pet.addExp(gain);
 
