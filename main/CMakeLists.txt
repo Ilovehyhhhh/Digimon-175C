@@ -11,6 +11,7 @@ idf_component_register(
         "app/battle.cpp"
         "ui/ui.cpp"
         "ui/pet_avatar.cpp"
+        "ui/clock.c"
         "ui/power.c"
         "ui/imu.c"
         "ui/digifont.c"

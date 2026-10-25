@@ -3,9 +3,13 @@
 #include "app/battle.h"
 #include "app/digimon_cfg.h"
 #include "board.h"
+#include "clock.h"
 #include "imu.h"
 #include "pet_avatar.h"
 #include "power.h"
+
+#include "esp_err.h"
+#include "esp_pm.h"
 
 #include "lvgl.h"
 #include "bsp/esp-bsp.h"
@@ -30,12 +34,14 @@ constexpr uint32_t C_GOOD   = 0x66BB6A;
 constexpr uint32_t C_WARN   = 0xFFA726;
 constexpr uint32_t C_BAD    = 0xEF5350;
 constexpr uint32_t TRAIN_MS = 10000;
-constexpr uint32_t LOCK_BRIGHT = 50;
+constexpr uint32_t UI_REFR_PERIOD_MS = 15;
+constexpr uint32_t LOCK_REFR_PERIOD_MS = 500;
 
 enum UiAct : uintptr_t {
   ACT_NONE = 0,
   ACT_EVOLVE, ACT_TRAIN, ACT_BATTLE, ACT_STATUS,
   ACT_TYPES, ACT_SYSTEM, ACT_HOME, ACT_RESET,
+  ACT_TIMESET, ACT_TIME_HM, ACT_TIME_HP, ACT_TIME_MM, ACT_TIME_MP,
 };
 
 Digimon *g_pet = nullptr;
@@ -49,6 +55,8 @@ uint8_t g_bright = 100;
 uint32_t g_toastUntil = 0;
 uint32_t g_trainEnd = 0;
 uint32_t g_lastSave = 0;
+uint32_t g_lastLockBat = 0;
+uint32_t g_lastClockSave = 0;
 uint32_t g_animCount = 0;
 uint16_t g_trainHits = 0;
 char g_toast[64] = "";
@@ -61,6 +69,7 @@ lv_obj_t *scr_evolve = nullptr;
 lv_obj_t *scr_status = nullptr;
 lv_obj_t *scr_types = nullptr;
 lv_obj_t *scr_system = nullptr;
+lv_obj_t *scr_time = nullptr;
 lv_obj_t *scr_train = nullptr;
 lv_obj_t *scr_battle = nullptr;
 lv_obj_t *scr_lock = nullptr;
@@ -105,7 +114,15 @@ lv_obj_t *btnBattleBack = nullptr;
 
 lv_obj_t *lblLockName = nullptr;
 lv_obj_t *lblLockInfo = nullptr;
+lv_obj_t *lblLockTime = nullptr;
 lv_obj_t *lblLockPct = nullptr;
+lv_obj_t *lblLockChg = nullptr;
+lv_obj_t *lockBatFill = nullptr;
+
+lv_obj_t *lblTimeSet = nullptr;
+
+lv_display_t *g_disp = nullptr;
+lv_timer_t *g_animTimer = nullptr;
 
 void onAction(lv_event_t *e);
 void onBattleAction(lv_event_t *e);
@@ -114,6 +131,11 @@ void onDevolveTarget(lv_event_t *e);
 void onBright(lv_event_t *e);
 void refreshHome();
 void goHome();
+void openTimeSet();
+void refreshTimeSet();
+void updateLockTime();
+void updateLockBattery();
+void setPm(bool locked);
 
 // ---------------------------------------------------------------- helpers
 
@@ -197,7 +219,7 @@ lv_obj_t *mkButton(lv_obj_t *parent, const char *text, int w, int h,
 }
 
 void applyBrightness() {
-  bsp_display_brightness_set(g_locked ? LOCK_BRIGHT : g_bright);
+  bsp_display_brightness_set(g_bright);
 }
 
 void goHome() {
@@ -217,8 +239,7 @@ void refreshHome() {
   char age[32];
   ageText(age, sizeof(age), g_pet->ageMin);
   PowerBatt b = powerBattery();
-  if (b.usb) lv_label_set_text_fmt(lblSub, "Lv.%u  %s  USB", (unsigned)g_pet->level(), age);
-  else if (b.pct >= 0) lv_label_set_text_fmt(lblSub, "Lv.%u  %s  %d%%", (unsigned)g_pet->level(), age, b.pct);
+  if (b.pct >= 0) lv_label_set_text_fmt(lblSub, "Lv.%u  %s  %d%%", (unsigned)g_pet->level(), age, b.pct);
   else lv_label_set_text_fmt(lblSub, "Lv.%u  %s", (unsigned)g_pet->level(), age);
 
   lv_label_set_text_fmt(lblType, "属性 %s", dgTypeName(g_pet->type()));
@@ -382,7 +403,7 @@ void refreshStatus() {
            (unsigned)g_pet->intel(), (unsigned)g_pet->train[DG_STAT_INT],
            (unsigned)g_pet->spi(), (unsigned)g_pet->train[DG_STAT_SPI],
            (unsigned)g_pet->spd(), (unsigned)g_pet->train[DG_STAT_SPD],
-           b.pct < 0 ? 0 : b.pct, b.usb ? " USB" : "");
+           b.pct < 0 ? 0 : b.pct, b.usb ? " 充电中" : "");
   lv_label_set_text(lblStatus, txt);
 }
 
@@ -467,7 +488,7 @@ void refreshSystemInfo() {
   char info[220];
   snprintf(info, sizeof(info),
            "电量  %d%%%s\n运行  %s\n设备  ESP32-S3 AMOLED 1.75C",
-           b.pct < 0 ? 0 : b.pct, b.usb ? "  USB" : "", uptime);
+           b.pct < 0 ? 0 : b.pct, b.usb ? "  充电中" : "", uptime);
   lv_label_set_text(lblSysInfo, info);
 }
 
@@ -533,14 +554,16 @@ void buildSystem() {
   lv_obj_set_style_text_align(lblKeys, LV_TEXT_ALIGN_LEFT, 0);
   lv_obj_set_style_text_line_space(lblKeys, 4, 0);
 
-  lv_obj_t *rst = mkButton(scr_system, "重置存档", 140, 40, &digifont_small, ACT_RESET, 0x5A1F1F);
-  lv_obj_set_pos(rst, 74, 312);
-  lv_obj_t *back = mkButton(scr_system, "返回", 120, 40, &digifont_small, ACT_HOME);
-  lv_obj_set_pos(back, 272, 312);
+  lv_obj_t *ts = mkButton(scr_system, "校时", 110, 40, &digifont_small, ACT_TIMESET);
+  lv_obj_set_pos(ts, 44, 352);
+  lv_obj_t *rst = mkButton(scr_system, "重置存档", 110, 40, &digifont_small, ACT_RESET, 0x5A1F1F);
+  lv_obj_set_pos(rst, 178, 352);
+  lv_obj_t *back = mkButton(scr_system, "返回", 110, 40, &digifont_small, ACT_HOME);
+  lv_obj_set_pos(back, 312, 352);
 
   lblSysMsg = mkLabel(scr_system, "", &digifont_small, C_WARN);
   lv_obj_set_width(lblSysMsg, 380);
-  lv_obj_align(lblSysMsg, LV_ALIGN_TOP_MID, 0, 362);
+  lv_obj_align(lblSysMsg, LV_ALIGN_TOP_MID, 0, 398);
 }
 
 // ---------------------------------------------------------------- evolve
@@ -793,14 +816,56 @@ void onBattleAction(lv_event_t *e) {
 
 // ---------------------------------------------------------------- lock
 
+void setPm(bool locked) {
+  esp_pm_config_t pm = {};
+  pm.max_freq_mhz = locked ? 80 : 240;
+  pm.min_freq_mhz = 40;
+  pm.light_sleep_enable = true;
+  esp_err_t err = esp_pm_configure(&pm);
+  if (err != ESP_OK) {
+    ESP_LOGW("pet-ui", "esp_pm_configure: %s", esp_err_to_name(err));
+  }
+  if (g_disp) {
+    lv_timer_t *rt = lv_display_get_refr_timer(g_disp);
+    if (rt) lv_timer_set_period(rt, locked ? LOCK_REFR_PERIOD_MS : UI_REFR_PERIOD_MS);
+  }
+}
+
+void updateLockTime() {
+  char hm[8] = "--:--";
+  clockGetHM(hm, sizeof(hm));
+  static char last[8] = "";
+  if (strcmp(hm, last) != 0) {
+    strncpy(last, hm, sizeof(last) - 1);
+    last[sizeof(last) - 1] = 0;
+    lv_label_set_text(lblLockTime, hm);
+  }
+}
+
+void updateLockBattery() {
+  PowerBatt b = powerBattery();
+  int pct = b.pct >= 0 ? b.pct : (b.usb ? 100 : -1);
+  if (pct >= 0) lv_label_set_text_fmt(lblLockPct, "%d%%", pct);
+  else lv_label_set_text(lblLockPct, "--");
+
+  uint32_t col = b.usb ? C_GOOD : (pct >= 50 ? C_GOOD : (pct >= 20 ? C_WARN : C_BAD));
+  int fw = pct < 0 ? 2 : pct * 56 / 100;
+  if (fw < 2) fw = 2;
+  lv_obj_set_width(lockBatFill, fw);
+  lv_obj_set_style_bg_color(lockBatFill, lv_color_hex(col), 0);
+
+  lv_label_set_text(lblLockChg, b.usb ? "充电中" : "");
+  lv_obj_set_style_text_color(lblLockChg,
+      lv_color_hex(b.charging ? C_GOOD : C_ACCENT), 0);
+}
+
 void updateLock() {
   if (!g_pet) return;
-  PowerBatt b = powerBattery();
   lv_label_set_text(lblLockName, g_pet->name());
   lv_label_set_text_fmt(lblLockInfo, "Lv.%u  %s", (unsigned)g_pet->level(),
                         dgTypeName(g_pet->type()));
-  if (b.pct >= 0) lv_label_set_text_fmt(lblLockPct, "%d%%", b.pct);
-  else lv_label_set_text(lblLockPct, b.usb ? "USB" : "--");
+  updateLockTime();
+  updateLockBattery();
 }
 
 void lockNow() {
@@ -808,8 +873,13 @@ void lockNow() {
   g_locked = true;
   g_training = false;
   if (g_pet) g_pet->save();
-  bsp_display_brightness_set(LOCK_BRIGHT);
+  clockSave();
+  bsp_display_brightness_set(g_bright);
+  setPm(true);
+  imuSetEnabled(false);
+  if (g_animTimer) lv_timer_pause(g_animTimer);
   updateLock();
+  g_lastLockBat = millis();
   lv_screen_load(scr_lock);
 }
 
@@ -817,27 +887,103 @@ void unlock() {
   if (!g_locked) return;
   g_locked = false;
   bsp_display_brightness_set(g_bright);
+  setPm(false);
+  imuSetEnabled(true);
+  if (g_animTimer) lv_timer_resume(g_animTimer);
   lv_screen_load(scr_home);
   refreshHome();
+}
+
+void refreshTimeSet() {
+  int h = 12, m = 0;
+  clockGetParts(&h, &m);
+  lv_label_set_text_fmt(lblTimeSet, "%02d:%02d", h, m);
+}
+
+void openTimeSet() {
+  refreshTimeSet();
+  lv_screen_load(scr_time);
+}
+
+void buildTimeSet() {
+  scr_time = mkScreen();
+  lv_obj_t *t = mkLabel(scr_time, "校时", &digifont, C_TEXT);
+  lv_obj_align(t, LV_ALIGN_TOP_MID, 0, 18);
+
+  lblTimeSet = mkLabel(scr_time, "--:--", &digifont_big, C_ACCENT);
+  lv_obj_set_width(lblTimeSet, 300);
+  lv_obj_align(lblTimeSet, LV_ALIGN_TOP_MID, 0, 70);
+
+  struct Item { const char *text; UiAct act; };
+  const Item items[4] = {
+    { "时-", ACT_TIME_HM }, { "时+", ACT_TIME_HP },
+    { "分-", ACT_TIME_MM }, { "分+", ACT_TIME_MP },
+  };
+  for (int i = 0; i < 4; i++) {
+    lv_obj_t *b = mkButton(scr_time, items[i].text, 90, 44, &digifont_small, items[i].act);
+    lv_obj_set_pos(b, 35 + i * 102, 200);
+  }
+
+  lv_obj_t *back = mkButton(scr_time, "返回", 120, 40, &digifont_small, ACT_SYSTEM);
+  lv_obj_align(back, LV_ALIGN_TOP_MID, 0, 330);
 }
 
 void buildLock() {
   scr_lock = mkScreen();
 
-  lv_obj_t *t = mkLabel(scr_lock, "已锁定", &digifont, C_DIM);
-  lv_obj_align(t, LV_ALIGN_TOP_MID, 0, 34);
+  lv_obj_t *t = mkLabel(scr_lock, "锁屏", &digifont_small, C_DIM);
+  lv_obj_align(t, LV_ALIGN_TOP_MID, 0, 30);
 
-  lblLockPct = mkLabel(scr_lock, "--", &digifont_big, C_ACCENT);
-  lv_obj_align(lblLockPct, LV_ALIGN_CENTER, 0, -20);
+  lblLockTime = mkLabel(scr_lock, "--:--", &digifont_big, C_ACCENT);
+  lv_obj_set_width(lblLockTime, 300);
+  lv_obj_align(lblLockTime, LV_ALIGN_TOP_MID, 0, 64);
+
+  lv_obj_t *body = lv_obj_create(scr_lock);
+  lv_obj_set_size(body, 64, 30);
+  lv_obj_set_pos(body, 160, 160);
+  lv_obj_set_style_radius(body, 6, 0);
+  lv_obj_set_style_border_width(body, 2, 0);
+  lv_obj_set_style_border_color(body, lv_color_hex(C_DIM), 0);
+  lv_obj_set_style_bg_opa(body, LV_OPA_TRANSP, 0);
+  lv_obj_set_style_pad_all(body, 0, 0);
+  lv_obj_remove_flag(body, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_remove_flag(body, LV_OBJ_FLAG_CLICKABLE);
+
+  lockBatFill = lv_obj_create(body);
+  lv_obj_set_size(lockBatFill, 2, 18);
+  lv_obj_set_pos(lockBatFill, 4, 4);
+  lv_obj_set_style_radius(lockBatFill, 3, 0);
+  lv_obj_set_style_bg_color(lockBatFill, lv_color_hex(C_GOOD), 0);
+  lv_obj_set_style_border_width(lockBatFill, 0, 0);
+  lv_obj_remove_flag(lockBatFill, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_remove_flag(lockBatFill, LV_OBJ_FLAG_CLICKABLE);
+
+  lv_obj_t *nub = lv_obj_create(scr_lock);
+  lv_obj_set_size(nub, 4, 14);
+  lv_obj_set_pos(nub, 225, 168);
+  lv_obj_set_style_radius(nub, 2, 0);
+  lv_obj_set_style_bg_color(nub, lv_color_hex(C_DIM), 0);
+  lv_obj_set_style_border_width(nub, 0, 0);
+  lv_obj_remove_flag(nub, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_remove_flag(nub, LV_OBJ_FLAG_CLICKABLE);
+
+  lblLockPct = mkLabel(scr_lock, "--", &digifont_small, C_TEXT);
+  lv_obj_set_pos(lblLockPct, 238, 164);
+  lv_obj_set_width(lblLockPct, 70);
+  lv_obj_set_style_text_align(lblLockPct, LV_TEXT_ALIGN_LEFT, 0);
+
+  lblLockChg = mkLabel(scr_lock, "", &digifont_small, C_GOOD);
+  lv_obj_set_width(lblLockChg, 300);
+  lv_obj_align(lblLockChg, LV_ALIGN_TOP_MID, 0, 204);
 
   lblLockName = mkLabel(scr_lock, "", &digifont, C_TEXT);
-  lv_obj_align(lblLockName, LV_ALIGN_CENTER, 0, 56);
+  lv_obj_align(lblLockName, LV_ALIGN_CENTER, 0, 20);
 
   lblLockInfo = mkLabel(scr_lock, "", &digifont_small, C_DIM);
-  lv_obj_align(lblLockInfo, LV_ALIGN_CENTER, 0, 88);
+  lv_obj_align(lblLockInfo, LV_ALIGN_CENTER, 0, 60);
 
   lv_obj_t *hint = mkLabel(scr_lock, "短按唤醒  长按关机", &digifont_small, C_DIM);
-  lv_obj_align(hint, LV_ALIGN_CENTER, 0, 138);
+  lv_obj_align(hint, LV_ALIGN_CENTER, 0, 110);
 }
 
 // ---------------------------------------------------------------- events
@@ -853,6 +999,11 @@ void onAction(lv_event_t *e) {
     case ACT_TYPES: lv_screen_load(scr_types); return;
     case ACT_SYSTEM: openSystem(); return;
     case ACT_HOME: goHome(); return;
+    case ACT_TIMESET: openTimeSet(); return;
+    case ACT_TIME_HM: clockAdjust(-1, 0); refreshTimeSet(); return;
+    case ACT_TIME_HP: clockAdjust(1, 0); refreshTimeSet(); return;
+    case ACT_TIME_MM: clockAdjust(0, -1); refreshTimeSet(); return;
+    case ACT_TIME_MP: clockAdjust(0, 1); refreshTimeSet(); return;
     case ACT_RESET:
       if (g_resetConfirm) {
         g_pet->reset();
@@ -906,7 +1057,7 @@ void statusTick(lv_timer_t *) {
   uint32_t now = millis();
 
   bool changed = g_pet->update(now);
-  if (changed) {
+  if (changed && !g_locked) {
     refreshHome();
     if (lv_screen_active() == scr_status) refreshStatus();
   }
@@ -914,6 +1065,10 @@ void statusTick(lv_timer_t *) {
   if (now - g_lastSave >= 300000) {
     if (g_pet->dirty) g_pet->save();
     g_lastSave = now;
+  }
+  if (now - g_lastClockSave >= 600000) {
+    g_lastClockSave = now;
+    clockSave();
   }
 
   if (g_training) {
@@ -926,8 +1081,15 @@ void statusTick(lv_timer_t *) {
     }
   }
 
-  if (g_locked && now % 5000 < 1000) updateLock();
-  if (lv_screen_active() == scr_system && now % 5000 < 1000) refreshSystemInfo();
+  if (g_locked) {
+    updateLockTime();
+    if (now - g_lastLockBat >= 30000) {
+      g_lastLockBat = now;
+      updateLockBattery();
+    }
+  } else if (lv_screen_active() == scr_system && now % 5000 < 1000) {
+    refreshSystemInfo();
+  }
 }
 
 void buttonTick(lv_timer_t *) {
@@ -972,17 +1134,19 @@ void ui_init(Digimon &pet) {
 
   powerInit();
   imuInit();
+  clockInit();
 
-  lv_display_t *disp = lv_display_get_default();
+  g_disp = lv_display_get_default();
   ESP_LOGI("pet-ui", "display %dx%d",
-           (int)lv_display_get_horizontal_resolution(disp),
-           (int)lv_display_get_vertical_resolution(disp));
+           (int)lv_display_get_horizontal_resolution(g_disp),
+           (int)lv_display_get_vertical_resolution(g_disp));
 
   buildHome();
   buildMenu();
   buildStatus();
   buildTypes();
   buildSystem();
+  buildTimeSet();
   buildEvolve();
   buildTraining();
   buildBattle();
@@ -991,9 +1155,11 @@ void ui_init(Digimon &pet) {
   refreshHome();
   lv_screen_load(scr_home);
   applyBrightness();
+  setPm(false);
 
   g_lastSave = millis();
-  lv_timer_create(animTick, 400, nullptr);
+  g_lastClockSave = millis();
+  g_animTimer = lv_timer_create(animTick, 400, nullptr);
   lv_timer_create(statusTick, 1000, nullptr);
   lv_timer_create(buttonTick, 60, nullptr);
 

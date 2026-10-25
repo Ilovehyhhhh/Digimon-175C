@@ -17,7 +17,7 @@ Waveshare 官方 BSP：`waveshare/esp32_s3_touch_amoled_1_75c`。
 | 电源管理 | AXP2101，I2C 地址 `0x34`，电池 + USB-C，PWR/PEK 按键 |
 | 传感器 | QMI8658 六轴 IMU（加速度 + 陀螺仪），I2C 地址 `0x6B` |
 | 音频 | ES8311 音频 Codec + 功放 + 扬声器 |
-| RTC | 无外部 RTC（没有 PCF85063；本固件用运行时间） |
+| RTC | 无外部 RTC（没有 PCF85063；本固件用软件时钟，可在系统页校时） |
 | SD 卡 | 当前 BSP 未启用，本固件不使用 |
 | 按键 | BOOT（GPIO0）+ PWR（AXP2101 PEK） |
 | 调试/烧录 | USB-C，USB Serial/JTAG（开发机枚举为 COM8） |
@@ -93,7 +93,9 @@ AXP2101 的 IRQ 没有引到 ESP32 GPIO，因此 PEK 事件通过 I2C 轮询
 
 ## 电源与烧录
 
-- 电池通过 AXP2101 管理；USB-C 插入时日志中电量会显示 `USB`。
+- 电池通过 AXP2101 管理；USB-C 插入时锁屏/系统页会显示“充电中”。
+- 固件启用了 ESP-IDF Power Management：锁屏时 CPU 最高 80MHz、light sleep 开启，
+  同时关闭 IMU 并降低 LVGL 刷新频率，以延长待机。
 - 烧录命令：
 
 ```powershell

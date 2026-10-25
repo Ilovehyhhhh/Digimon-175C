@@ -74,6 +74,11 @@ bool imuRead(float *ax, float *ay, float *az) {
   return true;
 }
 
+void imuSetEnabled(bool on) {
+  if (!s_ok) return;
+  regWrite(QMI_CTRL7, on ? 0x01 : 0x00);
+}
+
 bool imuShake(void) {
   static float lp = 1.0f;
   static bool active = false;

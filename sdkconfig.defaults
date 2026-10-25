@@ -47,3 +47,9 @@ CONFIG_NVS_ASSERT_ERROR_CHECK=n
 # asi que el DMA de SPI2 necesita un bounce buffer en RAM interna. El reservado por
 # defecto (32K) no basta para el flush de 466x50 (45K); subirlo a 64K.
 CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL=65536
+
+# Ahorro de energia en reposo / pantalla bloqueada
+CONFIG_PM_ENABLE=y
+CONFIG_FREERTOS_USE_TICKLESS_IDLE=y
+CONFIG_PM_DFS_INIT_AUTO=y
+# CONFIG_PM_SLP_SPIRAM_HALFSLEEP_ENABLED is not set

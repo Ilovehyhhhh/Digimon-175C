@@ -16,6 +16,9 @@ bool imuRead(float *ax, float *ay, float *az);
 // Llamar periodicamente (p.ej. cada 40-60 ms).
 bool imuShake(void);
 
+// Encender/apagar el acelerometro (ahorra energia con la pantalla bloqueada).
+void imuSetEnabled(bool on);
+
 #ifdef __cplusplus
 }
 #endif
