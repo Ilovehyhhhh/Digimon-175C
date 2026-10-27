@@ -19,16 +19,17 @@ static esp_codec_dev_handle_t s_spk = NULL;
 static TaskHandle_t s_task = NULL;
 static volatile uint8_t s_req = 0;
 static int16_t s_buf[AUDIO_MAX];
+static esp_codec_dev_sample_info_t s_fs;
 
 static int make_tone(uint8_t req) {
   int n;
   float amp;
   float dur;
-  if (req == 0) {           // click
+  if (req == 0) {
     n = AUDIO_SR * 45 / 1000;
     amp = 2600.0f;
     dur = 0.045f;
-  } else {                  // chirp
+  } else {
     n = AUDIO_SR * 180 / 1000;
     amp = 3400.0f;
     dur = 0.180f;
@@ -52,38 +53,41 @@ static int make_tone(uint8_t req) {
   return n;
 }
 
+static bool ensure_speaker(void) {
+  if (s_spk) return true;
+  s_spk = bsp_audio_codec_speaker_init();
+  if (!s_spk) {
+    ESP_LOGW(TAG, "sin codec de audio");
+    return false;
+  }
+  memset(&s_fs, 0, sizeof(s_fs));
+  s_fs.sample_rate = AUDIO_SR;
+  s_fs.channel = 1;
+  s_fs.bits_per_sample = 16;
+  return true;
+}
+
 static void audioTask(void *) {
   for (;;) {
     ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
-    if (!s_spk) continue;
+    if (!ensure_speaker()) continue;
+    if (esp_codec_dev_open(s_spk, &s_fs) != 0) {
+      ESP_LOGW(TAG, "no se pudo abrir el codec");
+      continue;
+    }
+    esp_codec_dev_set_out_vol(s_spk, 65);
     int n = make_tone(s_req);
     esp_codec_dev_write(s_spk, s_buf, n * 2);
+    vTaskDelay(pdMS_TO_TICKS(20));
+    esp_codec_dev_close(s_spk);
   }
 }
 
 void audioInit(void) {
-  s_spk = bsp_audio_codec_speaker_init();
-  if (!s_spk) {
-    ESP_LOGW(TAG, "sin codec de audio");
-    return;
-  }
-
-  esp_codec_dev_sample_info_t fs = {0};
-  fs.sample_rate = AUDIO_SR;
-  fs.channel = 1;
-  fs.bits_per_sample = 16;
-  if (esp_codec_dev_open(s_spk, &fs) != 0) {
-    ESP_LOGW(TAG, "no se pudo abrir el codec");
-    s_spk = NULL;
-    return;
-  }
-  esp_codec_dev_set_out_vol(s_spk, 65);
-
   if (xTaskCreate(audioTask, "audio", 4096, NULL, 4, &s_task) != pdPASS) {
     ESP_LOGW(TAG, "sin tarea de audio");
     s_task = NULL;
   }
-  ESP_LOGI(TAG, "audio listo");
 }
 
 void audioChirp(void) {
@@ -97,5 +101,3 @@ void audioClick(void) {
   s_req = 0;
   xTaskNotifyGive(s_task);
 }
-
-

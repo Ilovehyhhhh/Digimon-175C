@@ -54,6 +54,8 @@ bool g_locked = false;
 bool g_training = false;
 bool g_resetConfirm = false;
 bool g_petSleeping = false;
+bool g_lockDisplayOn = false;
+uint32_t g_lockOffAt = 0;
 uint8_t g_bright = 100;
 
 uint32_t g_toastUntil = 0;
@@ -165,6 +167,12 @@ uint32_t hpColor(uint16_t hp, uint16_t max) {
   if (pct > 50) return C_GOOD;
   if (pct > 25) return C_WARN;
   return C_BAD;
+}
+
+const char *battSuffix(const PowerBatt &b) {
+  if (b.charging) return " 充电中";
+  if (b.usb) return (b.pct >= 100) ? " 已充满" : " USB";
+  return "";
 }
 
 int moodFromHp() {
@@ -430,7 +438,7 @@ void refreshStatus() {
            (unsigned)g_pet->intel(), (unsigned)g_pet->train[DG_STAT_INT],
            (unsigned)g_pet->spi(), (unsigned)g_pet->train[DG_STAT_SPI],
            (unsigned)g_pet->spd(), (unsigned)g_pet->train[DG_STAT_SPD],
-           b.pct < 0 ? 0 : b.pct, b.usb ? " 充电中" : "");
+           b.pct < 0 ? 0 : b.pct, battSuffix(b));
   lv_label_set_text(lblStatus, txt);
 }
 
@@ -515,7 +523,7 @@ void refreshSystemInfo() {
   char info[220];
   snprintf(info, sizeof(info),
            "电量  %d%%%s\n运行  %s\n设备  ESP32-S3 AMOLED 1.75C",
-           b.pct < 0 ? 0 : b.pct, b.usb ? "  充电中" : "", uptime);
+           b.pct < 0 ? 0 : b.pct, battSuffix(b), uptime);
   lv_label_set_text(lblSysInfo, info);
 }
 
@@ -881,15 +889,16 @@ void updateLockBattery() {
   if (pct >= 0) lv_label_set_text_fmt(lblLockPct, "%d%%", pct);
   else lv_label_set_text(lblLockPct, "--");
 
-  uint32_t col = b.usb ? C_GOOD : (pct >= 50 ? C_GOOD : (pct >= 20 ? C_WARN : C_BAD));
+  const char *st = b.charging ? "充电中" : (b.usb ? (pct >= 100 ? "已充满" : "USB") : "");
+  lv_label_set_text(lblLockChg, st);
+  lv_obj_set_style_text_color(lblLockChg,
+      lv_color_hex(b.charging ? C_GOOD : (b.usb ? C_ACCENT : C_DIM)), 0);
+
+  uint32_t col = b.charging ? C_GOOD : (b.usb ? C_ACCENT : (pct >= 50 ? C_GOOD : (pct >= 20 ? C_WARN : C_BAD)));
   int fw = pct < 0 ? 2 : pct * 56 / 100;
   if (fw < 2) fw = 2;
   lv_obj_set_width(lockBatFill, fw);
   lv_obj_set_style_bg_color(lockBatFill, lv_color_hex(col), 0);
-
-  lv_label_set_text(lblLockChg, b.usb ? "充电中" : "");
-  lv_obj_set_style_text_color(lblLockChg,
-      lv_color_hex(b.charging ? C_GOOD : C_ACCENT), 0);
 }
 
 void updateLock() {
@@ -907,6 +916,8 @@ void lockNow() {
   g_training = false;
   if (g_pet) g_pet->save();
   clockSave();
+  g_lockDisplayOn = true;
+  g_lockOffAt = millis() + 20000;
   bsp_display_brightness_set(g_bright);
   setPm(true);
   imuSetEnabled(false);
@@ -919,6 +930,7 @@ void lockNow() {
 void unlock() {
   if (!g_locked) return;
   g_locked = false;
+  g_lockDisplayOn = false;
   bsp_display_brightness_set(g_bright);
   setPm(false);
   imuSetEnabled(true);
@@ -1166,13 +1178,27 @@ void statusTick(lv_timer_t *) {
     if (lv_screen_active() == scr_status) refreshStatus();
   }
 
-  if (now - g_lastSave >= 300000) {
+  if (now - g_lastSave >= 120000) {
     if (g_pet->dirty) g_pet->save();
     g_lastSave = now;
   }
-  if (now - g_lastClockSave >= 600000) {
+  if (now - g_lastClockSave >= 120000) {
     g_lastClockSave = now;
     clockSave();
+  }
+
+  static uint32_t lastBattCheck = 0;
+  static bool shuttingDown = false;
+  if (!shuttingDown && now - lastBattCheck >= 30000) {
+    lastBattCheck = now;
+    PowerBatt b = powerBattery();
+    if (!b.usb && b.pct >= 0 && b.pct <= 5) {
+      shuttingDown = true;
+      if (g_pet) g_pet->save();
+      clockSave();
+      ESP_LOGW("pet-ui", "bateria baja (%d%%), apagando", b.pct);
+      powerOff();
+    }
   }
 
   if (g_training) {
@@ -1186,10 +1212,18 @@ void statusTick(lv_timer_t *) {
   }
 
   if (g_locked) {
-    updateLockTime();
-    if (now - g_lastLockBat >= 30000) {
-      g_lastLockBat = now;
-      updateLockBattery();
+    if (g_lockDisplayOn) {
+      updateLockTime();
+      if (now - g_lastLockBat >= 30000) {
+        g_lastLockBat = now;
+        updateLockBattery();
+      }
+      if ((int32_t)(now - g_lockOffAt) >= 0) {
+        g_lockDisplayOn = false;
+        bsp_display_brightness_set(0);
+        lv_timer_t *rt = g_disp ? lv_display_get_refr_timer(g_disp) : nullptr;
+        if (rt) lv_timer_set_period(rt, 1000);
+      }
     }
   } else if (lv_screen_active() == scr_system && now % 5000 < 1000) {
     refreshSystemInfo();

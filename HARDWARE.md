@@ -97,7 +97,8 @@ AXP2101 的 IRQ 没有引到 ESP32 GPIO，因此 PEK 事件通过 I2C 轮询
 
 - 电池通过 AXP2101 管理；USB-C 插入时锁屏/系统页会显示“充电中”。
 - 固件启用了 ESP-IDF Power Management：锁屏时 CPU 最高 80MHz、light sleep 开启，
-  同时关闭 IMU 并降低 LVGL 刷新频率，以延长待机。
+  同时关闭 IMU 并降低 LVGL 刷新频率；锁屏 20 秒后自动关屏，音频功放只在发声时打开。
+- 宠物/时钟每 2 分钟写一次 NVS，锁屏时立即保存；电量低于 5% 时自动保存并软关机。
 - 烧录命令：
 
 ```powershell
