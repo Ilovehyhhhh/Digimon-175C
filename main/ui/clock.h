@@ -2,6 +2,7 @@
 
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -15,6 +16,8 @@ bool clockGetHM(char *buf, size_t n);
 bool clockGetParts(int *hour, int *minute);
 void clockAdjust(int dh, int dm);
 void clockSave(void);
+uint32_t clockGetEpoch(void);
+void clockSetEpoch(uint32_t epoch);
 
 #ifdef __cplusplus
 }

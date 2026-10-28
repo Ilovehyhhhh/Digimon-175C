@@ -13,6 +13,7 @@ idf_component_register(
         "ui/pet_avatar.cpp"
         "ui/clock.c"
         "ui/audio.c"
+        "ui/web.cpp"
         "ui/power.c"
         "ui/imu.c"
         "ui/digifont.c"
@@ -24,10 +25,16 @@ idf_component_register(
         "app"
         "app/compat"
     REQUIRES
+        waveshare__esp32_s3_touch_amoled_1_75c
         lvgl
         nvs_flash
         esp_timer
         cjson
+        esp_wifi
+        esp_netif
+        esp_event
+        esp_http_server
+        app_update
 )
 
 # LVGL con CONFIG_LV_ATTRIBUTE_FAST_MEM_USE_IRAM=y emite secciones IRAM que

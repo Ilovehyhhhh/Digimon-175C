@@ -8,6 +8,7 @@
 #include "imu.h"
 #include "pet_avatar.h"
 #include "power.h"
+#include "web.h"
 
 #include "esp_err.h"
 #include "esp_pm.h"
@@ -45,6 +46,7 @@ enum UiAct : uintptr_t {
   ACT_EVOLVE, ACT_TRAIN, ACT_BATTLE, ACT_STATUS,
   ACT_TYPES, ACT_SYSTEM, ACT_HOME, ACT_RESET,
   ACT_TIMESET, ACT_TIME_HM, ACT_TIME_HP, ACT_TIME_MM, ACT_TIME_MP,
+  ACT_WEB, ACT_WEB_STOP,
 };
 
 Digimon *g_pet = nullptr;
@@ -56,6 +58,8 @@ bool g_resetConfirm = false;
 bool g_petSleeping = false;
 bool g_lockDisplayOn = false;
 uint32_t g_lockOffAt = 0;
+bool g_screensReleased = false;
+bool g_webRequested = false;
 uint8_t g_bright = 100;
 
 uint32_t g_toastUntil = 0;
@@ -76,6 +80,7 @@ lv_obj_t *scr_status = nullptr;
 lv_obj_t *scr_types = nullptr;
 lv_obj_t *scr_system = nullptr;
 lv_obj_t *scr_time = nullptr;
+lv_obj_t *scr_web = nullptr;
 lv_obj_t *scr_train = nullptr;
 lv_obj_t *scr_battle = nullptr;
 lv_obj_t *scr_lock = nullptr;
@@ -128,6 +133,7 @@ lv_obj_t *lblLockChg = nullptr;
 lv_obj_t *lockBatFill = nullptr;
 
 lv_obj_t *lblTimeSet = nullptr;
+lv_obj_t *lblWebMsg = nullptr;
 
 lv_display_t *g_disp = nullptr;
 lv_timer_t *g_animTimer = nullptr;
@@ -145,6 +151,12 @@ void setPetSleeping(bool on);
 void wakePet();
 void openTimeSet();
 void refreshTimeSet();
+void openWeb();
+void buildWeb();
+void startWebCb(lv_timer_t *t);
+void releaseScreensForWeb();
+void rebuildScreens();
+void stopWebAndRestore();
 void updateLockTime();
 void updateLockBattery();
 void setPm(bool locked);
@@ -241,6 +253,8 @@ void applyBrightness() {
 }
 
 void goHome() {
+  g_webRequested = false;
+  stopWebAndRestore();
   g_training = false;
   g_resetConfirm = false;
   lv_screen_load(scr_home);
@@ -589,16 +603,18 @@ void buildSystem() {
   lv_obj_set_style_text_align(lblKeys, LV_TEXT_ALIGN_LEFT, 0);
   lv_obj_set_style_text_line_space(lblKeys, 4, 0);
 
-  lv_obj_t *ts = mkButton(scr_system, "校时", 110, 40, &digifont_small, ACT_TIMESET);
-  lv_obj_set_pos(ts, 44, 352);
-  lv_obj_t *rst = mkButton(scr_system, "重置存档", 110, 40, &digifont_small, ACT_RESET, 0x5A1F1F);
-  lv_obj_set_pos(rst, 178, 352);
-  lv_obj_t *back = mkButton(scr_system, "返回", 110, 40, &digifont_small, ACT_HOME);
-  lv_obj_set_pos(back, 312, 352);
+  lv_obj_t *ts = mkButton(scr_system, "校时", 80, 40, &digifont_small, ACT_TIMESET);
+  lv_obj_set_pos(ts, 53, 340);
+  lv_obj_t *web = mkButton(scr_system, "网页", 80, 40, &digifont_small, ACT_WEB);
+  lv_obj_set_pos(web, 143, 340);
+  lv_obj_t *rst = mkButton(scr_system, "重置", 80, 40, &digifont_small, ACT_RESET, 0x5A1F1F);
+  lv_obj_set_pos(rst, 233, 340);
+  lv_obj_t *back = mkButton(scr_system, "返回", 80, 40, &digifont_small, ACT_HOME);
+  lv_obj_set_pos(back, 323, 340);
 
   lblSysMsg = mkLabel(scr_system, "", &digifont_small, C_WARN);
   lv_obj_set_width(lblSysMsg, 380);
-  lv_obj_align(lblSysMsg, LV_ALIGN_TOP_MID, 0, 398);
+  lv_obj_align(lblSysMsg, LV_ALIGN_TOP_MID, 0, 392);
 }
 
 // ---------------------------------------------------------------- evolve
@@ -912,6 +928,8 @@ void updateLock() {
 
 void lockNow() {
   if (g_locked) return;
+  g_webRequested = false;
+  stopWebAndRestore();
   g_locked = true;
   g_training = false;
   if (g_pet) g_pet->save();
@@ -937,6 +955,70 @@ void unlock() {
   if (g_animTimer) lv_timer_resume(g_animTimer);
   lv_screen_load(scr_home);
   refreshHome();
+}
+
+void startWebCb(lv_timer_t *t) {
+  lv_timer_del(t);
+  if (!g_webRequested || g_locked) return;
+  g_webRequested = false;
+  releaseScreensForWeb();
+  if (!webStart(g_pet)) {
+    rebuildScreens();
+    toast("网页启动失败");
+    goHome();
+    return;
+  }
+  // Mientras la web esta activa no se redibuja la pantalla: WiFi y el bounce
+  // buffer SPI no caben a la vez en la RAM interna de esta placa.
+}
+
+void openWeb() {
+  if (!g_pet || g_locked) return;
+  if (webIsActive()) {
+    lv_screen_load(scr_web);
+    return;
+  }
+  g_webRequested = true;
+  lv_screen_load(scr_web);
+  lv_timer_create(startWebCb, 350, nullptr);
+}
+
+void buildWeb() {
+  scr_web = mkScreen();
+  lv_obj_t *t = mkLabel(scr_web, "网页管理", &digifont, C_TEXT);
+  lv_obj_align(t, LV_ALIGN_TOP_MID, 0, 18);
+
+  char line[64];
+  snprintf(line, sizeof(line), "WiFi  %s", webSsid());
+  lv_obj_t *l1 = mkLabel(scr_web, line, &digifont_small, C_TEXT);
+  lv_obj_set_width(l1, 380);
+  lv_obj_align(l1, LV_ALIGN_TOP_MID, 0, 62);
+
+  snprintf(line, sizeof(line), "密码  %s", webPassword());
+  lv_obj_t *l2 = mkLabel(scr_web, line, &digifont_small, C_TEXT);
+  lv_obj_set_width(l2, 380);
+  lv_obj_align(l2, LV_ALIGN_TOP_MID, 0, 92);
+
+  lv_obj_t *l3 = mkLabel(scr_web, "地址  http://192.168.4.1", &digifont_small, C_ACCENT);
+  lv_obj_set_width(l3, 380);
+  lv_obj_align(l3, LV_ALIGN_TOP_MID, 0, 128);
+
+  lv_obj_t *l4 = mkLabel(scr_web, "连接后浏览器打开地址", &digifont_small, C_DIM);
+  lv_obj_set_width(l4, 380);
+  lv_obj_align(l4, LV_ALIGN_TOP_MID, 0, 164);
+
+  lv_obj_t *l5 = mkLabel(scr_web, "存档 / 改数值 / OTA 固件", &digifont_small, C_DIM);
+  lv_obj_set_width(l5, 380);
+  lv_obj_align(l5, LV_ALIGN_TOP_MID, 0, 192);
+
+  lblWebMsg = mkLabel(scr_web, "AP 已启动", &digifont_small, C_GOOD);
+  lv_obj_set_width(lblWebMsg, 380);
+  lv_obj_align(lblWebMsg, LV_ALIGN_TOP_MID, 0, 230);
+
+  lv_obj_t *hint = mkLabel(scr_web, "按 BOOT 短按退出网页\n5 分钟无操作自动关闭",
+                           &digifont_small, C_DIM);
+  lv_obj_set_width(hint, 380);
+  lv_obj_align(hint, LV_ALIGN_TOP_MID, 0, 300);
 }
 
 void refreshTimeSet() {
@@ -1031,6 +1113,40 @@ void buildLock() {
   lv_obj_align(hint, LV_ALIGN_CENTER, 0, 110);
 }
 
+void releaseScreensForWeb() {
+  if (g_screensReleased) return;
+  lv_obj_t *screens[] = {
+    scr_home, scr_menu, scr_status, scr_types, scr_system,
+    scr_time, scr_evolve, scr_train, scr_battle, scr_lock,
+  };
+  for (lv_obj_t *s : screens) {
+    if (s) lv_obj_delete(s);
+  }
+  scr_home = scr_menu = scr_status = scr_types = scr_system = nullptr;
+  scr_time = scr_evolve = scr_train = scr_battle = scr_lock = nullptr;
+  g_screensReleased = true;
+}
+
+void rebuildScreens() {
+  if (!g_screensReleased) return;
+  buildHome();
+  buildMenu();
+  buildStatus();
+  buildTypes();
+  buildSystem();
+  buildTimeSet();
+  buildEvolve();
+  buildTraining();
+  buildBattle();
+  buildLock();
+  g_screensReleased = false;
+}
+
+void stopWebAndRestore() {
+  if (webIsActive()) webStop();
+  if (g_screensReleased) rebuildScreens();
+}
+
 // ---------------------------------------------------------------- touch / sleep
 
 void animHeartY(void *var, int32_t v) {
@@ -1111,6 +1227,8 @@ void onAction(lv_event_t *e) {
     case ACT_SYSTEM: openSystem(); return;
     case ACT_HOME: goHome(); return;
     case ACT_TIMESET: openTimeSet(); return;
+    case ACT_WEB: openWeb(); return;
+    case ACT_WEB_STOP: webStop(); goHome(); return;
     case ACT_TIME_HM: clockAdjust(-1, 0); refreshTimeSet(); return;
     case ACT_TIME_HP: clockAdjust(1, 0); refreshTimeSet(); return;
     case ACT_TIME_MM: clockAdjust(0, -1); refreshTimeSet(); return;
@@ -1124,7 +1242,7 @@ void onAction(lv_event_t *e) {
         return;
       }
       g_resetConfirm = true;
-      lv_label_set_text(lblSysMsg, "再点一次 重置存档 确认");
+      lv_label_set_text(lblSysMsg, "再点一次 重置 确认");
       return;
     default:
       refreshHome();
@@ -1152,7 +1270,7 @@ void onDevolveTarget(lv_event_t *e) {
 
 void animTick(lv_timer_t *) {
   g_animCount++;
-  if (!g_pet || g_locked) return;
+  if (!g_pet || g_locked || webIsActive()) return;
 
   static const int8_t bob[8] = { 0, -1, -3, -4, -3, -1, 1, 0 };
   uint8_t act = g_pet->act(millis());
@@ -1170,10 +1288,10 @@ void statusTick(lv_timer_t *) {
   if (g_pet->justHatched) {
     g_pet->justHatched = false;
     g_pet->save();
-    if (!g_locked) toast("孵化成功!");
+    if (!g_locked && !webIsActive()) toast("孵化成功!");
     changed = true;
   }
-  if (changed && !g_locked) {
+  if (changed && !g_locked && !webIsActive()) {
     refreshHome();
     if (lv_screen_active() == scr_status) refreshStatus();
   }
@@ -1199,6 +1317,14 @@ void statusTick(lv_timer_t *) {
       ESP_LOGW("pet-ui", "bateria baja (%d%%), apagando", b.pct);
       powerOff();
     }
+  }
+
+  if (webIsActive()) {
+    if ((uint32_t)(now - webLastActivity()) > 300000) {
+      stopWebAndRestore();
+      goHome();
+    }
+    return;
   }
 
   if (g_training) {
@@ -1246,6 +1372,7 @@ void buttonTick(lv_timer_t *) {
     else goHome();
     return;
   }
+  if (webIsActive()) return;
 
   bool shook = imuShake();
   if (g_training) {
@@ -1303,6 +1430,7 @@ void ui_init(Digimon &pet) {
   buildTypes();
   buildSystem();
   buildTimeSet();
+  buildWeb();
   buildEvolve();
   buildTraining();
   buildBattle();
@@ -1320,4 +1448,18 @@ void ui_init(Digimon &pet) {
   lv_timer_create(buttonTick, 60, nullptr);
 
   ESP_LOGI("pet-ui", "mascota lista: %s", pet.name());
+}
+
+void uiRefreshFromWeb(void) {
+  if (webIsActive()) return;
+  bsp_display_lock(-1);
+  if (!g_pet) {
+    bsp_display_unlock();
+    return;
+  }
+  refreshHome();
+  if (lv_screen_active() == scr_status) refreshStatus();
+  if (lv_screen_active() == scr_system) refreshSystemInfo();
+  if (lv_screen_active() == scr_time) refreshTimeSet();
+  bsp_display_unlock();
 }

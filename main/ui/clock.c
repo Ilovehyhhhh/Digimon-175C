@@ -104,6 +104,17 @@ void clockSave(void) {
   nvs_commit(s_nvs);
 }
 
+uint32_t clockGetEpoch(void) {
+  time_t now = time(NULL);
+  return valid_epoch(now) ? (uint32_t)now : 0;
+}
+
+void clockSetEpoch(uint32_t epoch) {
+  if (!valid_epoch((time_t)epoch)) return;
+  set_epoch((time_t)epoch);
+  clockSave();
+}
+
 void clockAdjust(int dh, int dm) {
   time_t now = time(NULL);
   if (!valid_epoch(now)) now = build_time();

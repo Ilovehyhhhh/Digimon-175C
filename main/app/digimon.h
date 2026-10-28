@@ -38,6 +38,7 @@ class Digimon {
 
   void begin();
   bool update(uint32_t nowMs);   // regeneracion + exp por tiempo
+  void sanitize();               // limita valores importados por la web
   void save();
   void load();
   void reset();

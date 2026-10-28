@@ -1,8 +1,9 @@
 # 硬件说明 — Waveshare ESP32-S3-Touch-AMOLED-1.75C
 
 本项目运行在 **Waveshare ESP32-S3-Touch-AMOLED-1.75C**（V1.0）上。
-引脚与能力数据整理在 [`main/board.h`](main/board.h)，显示/触摸/I2C 初始化使用
-Waveshare 官方 BSP：`waveshare/esp32_s3_touch_amoled_1_75c`。
+引脚与能力数据整理在 [`main/board.h`](main/board.h)。显示/触摸/I2C 初始化使用
+Waveshare 官方 BSP 的本地副本：`components/waveshare__esp32_s3_touch_amoled_1_75c`
+（LVGL 部分刷新高度改为 4 行，给 WiFi + OTA 留出内部 RAM）。
 
 ## 板卡规格
 
@@ -89,16 +90,23 @@ AXP2101 的 IRQ 没有引到 ESP32 GPIO，因此 PEK 事件通过 I2C 轮询
 - `main/ui/audio.c`：用 `bsp_audio_codec_speaker_init()` 打开 ES8311，在独立
   FreeRTOS 任务里播放合成按键音 / 宠物叫声，不阻塞 LVGL。
 - `main/ui/ui.cpp`：LVGL 全屏 UI；`pet-ui: display 466x466` 可在串口日志确认。
+- `main/ui/web.cpp`：按需启动 2.4GHz SoftAP（`Digimon-175C` / `digimon123`）和
+  HTTP 服务，提供存档 JSON 导入导出、数值编辑和 `/api/ota` 固件上传。网页模式会
+  临时释放其它 LVGL 界面，保持屏幕静态；BOOT 短按退出后关闭 WiFi 并重建界面。
 - `main/board.h`：本文件的引脚/能力常量，来源于参考工程
   [`claude-desktop-buddy-esp32`](https://github.com/vthinkxie/claude-desktop-buddy-esp32)
   的 `src/boards/board_waveshare_esp32s3_touch_amoled_1_75c.h`。
 
 ## 电源与烧录
 
-- 电池通过 AXP2101 管理；USB-C 插入时锁屏/系统页会显示“充电中”。
+- 电池通过 AXP2101 管理；只有实际充电时锁屏/系统页显示“充电中”，插 USB 未充电
+  显示“USB”，满电显示“已充满”。
 - 固件启用了 ESP-IDF Power Management：锁屏时 CPU 最高 80MHz、light sleep 开启，
   同时关闭 IMU 并降低 LVGL 刷新频率；锁屏 20 秒后自动关屏，音频功放只在发声时打开。
 - 宠物/时钟每 2 分钟写一次 NVS，锁屏时立即保存；电量低于 5% 时自动保存并软关机。
+- 分区表为 OTA A/B：`ota_0` / `ota_1` 各 4MB，另有 `otadata` 和 7MB `storage`。
+  第一次升级到本版本必须用 USB 烧录一次新分区表；之后可在网页上传
+  `build/digimon_pet.bin` 做 OTA，重启后仍保留 NVS 存档。
 - 烧录命令：
 
 ```powershell
@@ -106,7 +114,8 @@ AXP2101 的 IRQ 没有引到 ESP32 GPIO，因此 PEK 事件通过 I2C 轮询
 idf.py -p COM8 flash monitor
 ```
 
-- 首次编译会从组件仓库拉取 `waveshare/esp32_s3_touch_amoled_1_75c` 和 LVGL。
+- 本地 BSP 已包含在 `components/waveshare__esp32_s3_touch_amoled_1_75c`；其余组件
+  （LVGL、CO5300、CST9217、ES8311 等）首次编译时从组件仓库拉取。
 
 ## 参考
 

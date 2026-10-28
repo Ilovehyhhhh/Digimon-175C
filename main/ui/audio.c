@@ -11,7 +11,7 @@
 #include <string.h>
 
 #define AUDIO_SR 22050
-#define AUDIO_MAX 4096
+#define AUDIO_MAX 2048
 #define AUDIO_PI 3.14159265f
 
 static const char *TAG = "audio";
@@ -26,13 +26,13 @@ static int make_tone(uint8_t req) {
   float amp;
   float dur;
   if (req == 0) {
-    n = AUDIO_SR * 45 / 1000;
+    n = AUDIO_SR * 22 / 1000;
     amp = 2600.0f;
-    dur = 0.045f;
+    dur = 0.022f;
   } else {
-    n = AUDIO_SR * 180 / 1000;
+    n = AUDIO_SR * 90 / 1000;
     amp = 3400.0f;
-    dur = 0.180f;
+    dur = 0.090f;
   }
   if (n > AUDIO_MAX) n = AUDIO_MAX;
 

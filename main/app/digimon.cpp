@@ -224,6 +224,21 @@ uint8_t Digimon::hatchLeft() const {
   return left > 0 ? (uint8_t)left : 0;
 }
 
+void Digimon::sanitize() {
+  if (g_spN <= 0) form = 0;
+  else if (form >= (uint8_t)g_spN) form = (uint8_t)(g_spN - 1);
+  if (ageMin > 10000000UL) ageMin = 10000000UL;
+  if (exp > 10000000UL) exp = 10000000UL;
+  if (weightBonus10 > 50000) weightBonus10 = 50000;
+  for (int i = 0; i < DG_STAT_N; i++) {
+    if (train[i] > 9999) train[i] = 9999;
+  }
+  if (wins > 9999) wins = 9999;
+  if (hp == 0) hp = maxHp();
+  clampVitals();
+  dirty = true;
+}
+
 void Digimon::save() {
   s_prefs.putUChar("ver", DG_SAVE_VER);
   s_prefs.putUChar("form", form);

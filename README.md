@@ -32,18 +32,23 @@ Waveshare **ESP32-S3-Touch-AMOLED-1.75C** 圆屏开发板上。
 - **训练**：10 秒摇一摇或连续点击，随机提升战斗能力并增加体重。
 - **锁屏**：大号时间 + 电池图标 + 百分比；按实际状态显示“充电中 / 已充满 / USB”，
   亮度跟随系统页设置；锁屏 20 秒后自动关屏省电，PWR 短按解锁。
-- **系统页**：亮度滑条（掉电保存）、校时、电量、运行时间、设备信息、实体键说明、重置存档。
+- **系统页**：亮度滑条（掉电保存）、校时、电量、运行时间、设备信息、实体键说明、网页管理、重置存档。
+- **网页管理 / OTA**：系统页进入网页模式后，手机/电脑连接设备 AP `Digimon-175C`
+  （密码 `digimon123`），打开 `http://192.168.4.1` 即可导出/导入 JSON 存档、直接改数值、
+  上传 `.bin` 固件做 OTA。网页模式会临时释放界面内存，设备屏幕保持静态；BOOT 短按退出，
+  5 分钟无操作自动关闭，WiFi 只在网页模式开启。
 - **省电**：锁屏时 CPU 降到 80MHz、开启 light sleep、关闭 IMU、暂停动画、降低 LVGL 刷新、
   20 秒后关屏；每次发声后关闭 ES8311/功放，避免待机音频耗电。
 - **实体按键**：锁屏/唤醒、关机都走实体键；屏幕锁定后触摸不会唤醒。
 
-> 已移除喂食 / 玩耍 / 清洁 / 睡觉等旧养成按钮，也移除了 WiFi/NTP 与 TamaPoke 遗留模块。
+> 已移除喂食 / 玩耍 / 清洁 / 睡觉等旧养成按钮，也移除了 TamaPoke 遗留模块；
+> WiFi 不再常开，只用于按需进入的网页管理/OTA 模式。
 
 ## 按键
 
 | 操作 | 效果 |
 | --- | --- |
-| BOOT 短按 | 主界面打开菜单；子界面返回；**锁屏时不响应** |
+| BOOT 短按 | 主界面打开菜单；子界面返回（网页模式退出并关闭 WiFi）；**锁屏时不响应** |
 | PWR 短按 | **锁屏 / 唤醒**（锁屏只能用它退出） |
 | PWR 长按 | **关机**（AXP2101 软关机） |
 | PWR 极长按 | AXP2101 硬件关机 |
@@ -62,6 +67,8 @@ Digimon-175C/
   sdkconfig.defaults
   partitions.csv
   HARDWARE.md                 # 板卡规格 / 引脚 / 电源与按键
+  components/
+    waveshare__esp32_s3_touch_amoled_1_75c/  # 本地 BSP（LVGL 部分刷新 4 行，兼容 WiFi 内存）
   main/
     CMakeLists.txt
     main.cpp                  # app_main: NVS -> 配置 -> BSP 显示 -> UI
@@ -79,6 +86,7 @@ Digimon-175C/
       audio.{c,h}             # ES8311 叫声 / 按键音
       power.{c,h}             # BOOT / AXP2101 按键、电量、关机
       imu.{c,h}               # QMI8658 摇一摇
+      web.{cpp,h}             # 本地 AP + 网页存档/改数值/OTA
       digifont*.c             # 生成的中文字库
   docs/
     EVOLUTION.md              # 完整进化网 + 条件表
@@ -142,6 +150,25 @@ python tools\gen_font.py
 
 游戏逻辑、数值和界面都不需要改。
 
+## 网页管理 / OTA
+
+1. 设备进入「系统 → 网页」；屏幕会显示 AP 信息并保持静态。
+2. 手机/电脑连接 WiFi：
+   - SSID：`Digimon-175C`
+   - 密码：`digimon123`
+   - 地址：`http://192.168.4.1`
+3. 网页内可以：
+   - **导出 JSON**：下载完整存档（形态、年龄、经验、体重、HP/SP、训练值、胜场、时间）。
+   - **导入 JSON**：用导出的文件覆盖当前存档。
+   - **改数值**：表单直接修改形态/等级相关数值/训练值/时间，保存后写入 NVS。
+   - **OTA 固件**：选择 `build/digimon_pet.bin`（应用固件，不是合并镜像）上传；
+     写入完成后设备自动重启，仍保留 NVS 存档。
+4. 退出：按 **BOOT 短按**，或等待 5 分钟无操作自动关闭；退出后 WiFi 关闭、界面重建。
+
+> 网页模式为了给 WiFi 腾出内部 RAM，会临时删除并释放其它 LVGL 界面，屏幕保持
+> 静态 AP 信息（不再刷新）；退出网页模式后自动重建界面。这样 WiFi 和 AMOLED
+> 的 SPI DMA 不会同时抢内部 RAM。
+
 ## 编译与烧录
 
 本机 ESP-IDF v6.1 / EIM 环境：
@@ -154,8 +181,12 @@ idf.py build
 idf.py -p COM8 flash monitor
 ```
 
-首次编译会从组件仓库拉取 Waveshare BSP
-(`waveshare/esp32_s3_touch_amoled_1_75c`) 与 LVGL。
+BSP 已放在 `components/waveshare__esp32_s3_touch_amoled_1_75c`（本地组件，LVGL
+部分刷新高度改为 4 行，避免 WiFi 与 AMOLED SPI DMA 抢内部 RAM）；其余组件首次编译时
+仍会从组件仓库拉取。
+
+分区表已改为 OTA A/B（`ota_0` / `ota_1`，各 4MB）。**第一次升级到本版本必须用 USB
+串口烧录一次**，之后就可以在网页里上传 `build/digimon_pet.bin` 做 OTA 升级。
 
 ## 生成资源
 
